@@ -1,11 +1,10 @@
 # DataLens 🔍 - Your AI-Powered CSV Analysis Companion 📊
 
-DataLens is an educational tool that helps you analyze CSV files using natural language queries and AI assistance! Perfect for students, data enthusiasts, and educators looking to explore data interactively.
+DataLens is an educational tool that helps you analyze CSV files using natural language queries and AI assistance! Perfect for students, data enthusiasts, and educators looking to explore data interactively. The tool accepts english prompts and outputs sql queries to find data within provided sources.
 
 ## Features ✨
 
 - 🤖 AI-powered data analysis using Ollama models
-- 📈 Interactive data visualization with Plotly
 - 📁 Support for multiple CSV files
 - 🎯 Column and row selection capabilities
 - 🌡️ Adjustable AI temperature settings
