@@ -52,6 +52,9 @@ async def ai_agent_interaction(query: str, model_name: str, temperature: float) 
     response = await client.chat(
         model=model_name,
         messages=messages,
+        options={
+        "temperature": temperature 
+        }, 
         tools=[{
             'type': 'function',
             'function': {
@@ -135,27 +138,25 @@ def check_ollama_server():
     except requests.exceptions.RequestException:
         return False
 
-# Sidebar components
 with st.sidebar:
     st.title('Data Lens 🔍')
 
-    st.header('AI Agent Query')
-    user_query = st.text_input('Enter your query for the AI agent:')
-    model_temperature = st.slider('Model Temperature', min_value=0.0, max_value=1.0, value=0.7)
-    st.header('Model Selection')
-    if check_ollama_server():
-        available_models = get_available_ollama_models()
-        if available_models:
-            model_name = st.selectbox('Select Ollama Model', available_models)
+    with st.expander("🛠️ Model Settings", expanded=False):
+        if check_ollama_server():
+            available_models = get_available_ollama_models()
+            if available_models:
+                model_name = st.selectbox('Select Ollama Model', available_models)
+            else:
+                st.warning('No models found. Please ensure Ollama models are loaded.')
+                model_name = None
         else:
-            st.warning('No models found. Please ensure Ollama models are loaded.')
+            st.error('Ollama server is not running. Please start Ollama to use the AI agent.')
             model_name = None
-    else:
-        st.error('Ollama server is not running. Please start Ollama to use the AI agent.')
-        model_name = None
+        model_temperature = st.slider('Model Temperature', min_value=0.0, max_value=1.0, value=0.7)
+        
 
-        st.header('File Upload')
     uploaded_files = st.file_uploader('Upload CSV files', type='csv', accept_multiple_files=True)
+
     # Manage uploaded files
     if uploaded_files:
         for uploaded_file in uploaded_files:
@@ -168,21 +169,15 @@ with st.sidebar:
         selected_file = st.selectbox('Select File for Analysis', file_names)
         df = st.session_state['uploaded_files'][selected_file]
 
-        st.subheader(f'Select Data from {selected_file}')
-        # Column selection
-        selected_columns = st.multiselect(f'Select Columns ({selected_file})', df.columns.tolist(), key=f'select_columns_{selected_file}')
-        # Row selection
-        selected_rows = st.multiselect(f'Select Rows ({selected_file})', df.index.tolist(), key=f'select_rows_{selected_file}')
-        # Store the selected DataFrame in session state
-        if selected_rows and selected_columns:
-            st.session_state['selected_df'] = df.loc[selected_rows, selected_columns]
-        elif selected_rows:
-            st.session_state['selected_df'] = df.loc[selected_rows, :]
-        elif selected_columns:
-            st.session_state['selected_df'] = df.loc[:, selected_columns]
-        else:
-            st.session_state['selected_df'] = df
+        # Remove the commented out row/column selection code
+        st.session_state['selected_df'] = df
         st.session_state['selected_df_file_name'] = selected_file
+
+
+    st.header('AI Agent Query')
+    user_query = st.text_area('Enter your query for the AI agent:', height=100)
+    submit_query = st.button('Submit Query')
+
 
 # Main content area
 st.header('Data Viewer')
@@ -193,32 +188,9 @@ if st.session_state['uploaded_files']:
         df = st.session_state['uploaded_files'][file_name]
         with tabs[idx]:
             st.subheader(f'Data from {file_name}')
-            # Get selected columns and rows for this file
-            selected_columns = st.session_state.get(f'select_columns_{file_name}', df.columns.tolist())
-            selected_rows = st.session_state.get(f'select_rows_{file_name}', df.index.tolist())
-            # Highlight selected rows and columns
-            def highlight_selection(x):
-                df_styled = pd.DataFrame('', index=df.index, columns=df.columns)
-                if selected_rows:
-                    for row in selected_rows:
-                        if row in df.index:
-                            df_styled.loc[row, :] = 'background-color: #e6ffcc'  # Light yellow
-                if selected_columns:
-                    for col in selected_columns:
-                        if col in df.columns:
-                            df_styled.loc[:, col] = 'background-color: #b3d1ff'  # Light blue
-                if selected_rows and selected_columns:
-                    for row in selected_rows:
-                        for col in selected_columns:
-                            if row in df.index and col in df.columns:
-                                df_styled.loc[row, col] = 'background-color: #ffcccb'  # Light red
-                return df_styled
-
-            styled_df = df.style.apply(highlight_selection, axis=None)
-            st.dataframe(styled_df)
-
+            st.dataframe(df)
 # Handle AI agent interaction
-if user_query and model_name and check_ollama_server():
+if submit_query and check_ollama_server():  
     st.header('AI Agent Response')
     if st.session_state['selected_df'] is not None:
         with st.spinner('Analyzing data...'):
@@ -226,7 +198,6 @@ if user_query and model_name and check_ollama_server():
             if result['sql_query']:
                 st.subheader('Generated SQL Query')
                 st.code(result['sql_query'], language='sql')
-                
                 if result['sql_results']:  # Add this section to display results
                     st.subheader('Query Results')
                     if isinstance(result['sql_results'], list):
