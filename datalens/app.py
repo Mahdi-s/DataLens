@@ -1,10 +1,7 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 import requests
-from langchain.llms import Ollama
-import ollama  # Add this import
-from langchain import PromptTemplate, LLMChain
+import ollama  
 import duckdb  
 import json
 import asyncio
