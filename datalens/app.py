@@ -3,8 +3,13 @@ import pandas as pd
 import plotly.express as px
 import requests
 from langchain.llms import Ollama
+import ollama  # Add this import
 from langchain import PromptTemplate, LLMChain
-import duckdb  # Added for SQL query execution
+import duckdb  
+import json
+import asyncio
+from typing import Dict, Any
+
 
 # Set Streamlit page configuration
 st.set_page_config(page_title='CSV Analyzer', layout='wide')
@@ -17,29 +22,97 @@ if 'selected_df' not in st.session_state:
 if 'selected_df_file_name' not in st.session_state:
     st.session_state['selected_df_file_name'] = None
 
-def ai_agent_interaction(query, model_name, temperature, selected_df):
-    """
-    Interact with the AI agent to translate user queries into SQL.
-    """
-    # Initialize the Ollama LLM
-    llm = Ollama(model=model_name, base_url='http://localhost:11434', temperature=temperature)
-    
-    # Extract column information
-    columns_info = ', '.join([f"'{col}'" for col in selected_df.columns])
-    table_name = 'selected_df'
-    
-    template = PromptTemplate(
-        input_variables=["query", "columns_info", "table_name"],
-        template="""
-You are an AI assistant specialized in data manipulation and analysis. The table '{table_name}' has the following columns: {columns_info}. Perform the task described in the query using only this table. Do not use hardcoded data. Output only the SQL query that achieves the task.
+def execute_sql_query(query: str) -> str:
+    """Execute SQL query against the selected dataframe."""
+    try:
+        if st.session_state['selected_df'] is None:
+            return json.dumps({"error": "No dataframe selected"})
+        
+        con = duckdb.connect()
+        con.register('selected_df', st.session_state['selected_df'])
+        result_df = con.execute(query).df()
+        return json.dumps(result_df.to_dict(orient='records'))
+    except Exception as e:
+        return json.dumps({"error": str(e)})
 
-Query: {query}
-
-SQL query:"""
+async def ai_agent_interaction(query: str, model_name: str, temperature: float) -> Dict[str, Any]:
+    """Handle AI agent interaction using Ollama's tool calling."""
+    client = ollama.AsyncClient()
+    
+    # Prepare context about the available data
+    columns_info = ', '.join([f"'{col}'" for col in st.session_state['selected_df'].columns])
+    context = f"""You are a data analysis assistant. You have access to a table 'selected_df' with the following columns: {columns_info}.
+    Generate and execute SQL queries to answer user questions about this data. Always return both the SQL query and its results.
+    """
+    
+    # Initialize conversation
+    messages = [
+        {'role': 'system', 'content': context},
+        {'role': 'user', 'content': query}
+    ]
+    
+    # First API call: Get SQL query from the model
+    response = await client.chat(
+        model=model_name,
+        messages=messages,
+        tools=[{
+            'type': 'function',
+            'function': {
+                'name': 'execute_sql_query',
+                'description': 'Execute SQL query against the selected dataframe',
+                'parameters': {
+                    'type': 'object',
+                    'properties': {
+                        'query': {
+                            'type': 'string',
+                            'description': 'SQL query to execute'
+                        }
+                    },
+                    'required': ['query']
+                }
+            }
+        }]
     )
-    llm_chain = LLMChain(llm=llm, prompt=template)
-    response = llm_chain.run(query=query, columns_info=columns_info, table_name=table_name)
-    return response
+    
+    messages.append(response['message'])
+    sql_results = None  # Add this line to store query results
+
+    # Execute the SQL query if the model made a tool call
+    if response['message'].get('tool_calls'):
+        for tool in response['message']['tool_calls']:
+            if tool['function']['name'] == 'execute_sql_query':
+                query_args = tool['function']['arguments']
+                function_response = execute_sql_query(query_args['query'])
+                sql_results = json.loads(function_response)  # Add this line to parse results
+                messages.append({
+                    'role': 'tool',
+                    'content': function_response,
+                    'name': tool['function']['name']
+                })
+    
+    # Get final response with analysis
+    final_response = await client.chat(
+        model=model_name,
+        messages=messages,
+    )
+    
+    return {
+        'sql_query': response['message']['tool_calls'][0]['function']['arguments'].get('query') if response['message'].get('tool_calls') else None,
+        'analysis': final_response['message']['content'],
+        'sql_results': sql_results  
+    }
+
+
+def extract_sql_query(response):
+    # Extract the SQL query from the function call in the response
+    start = response.find('<function_call>')
+    end = response.find('</function_call>')
+    if start != -1 and end != -1:
+        function_call = response[start:end]
+        query_start = function_call.find('"query": "') + 10
+        query_end = function_call.find('"}', query_start)
+        return function_call[query_start:query_end]
+    return None
 
 # Function to get available Ollama models
 def get_available_ollama_models():
@@ -147,24 +220,24 @@ if st.session_state['uploaded_files']:
             styled_df = df.style.apply(highlight_selection, axis=None)
             st.dataframe(styled_df)
 
-# AI Agent Interaction
+# Handle AI agent interaction
 if user_query and model_name and check_ollama_server():
     st.header('AI Agent Response')
-    if 'selected_df' in st.session_state and st.session_state['selected_df'] is not None:
-        selected_df = st.session_state['selected_df']
-        with st.spinner('Generating SQL query...'):
-            response = ai_agent_interaction(user_query, model_name, model_temperature, selected_df)
-        st.write("AI Agent generated SQL query:")
-        st.code(response)
-        # Attempt to execute the generated SQL query
-        try:
-            con = duckdb.connect()
-            con.register('selected_df', selected_df)
-            result_df = con.execute(response).df()
-            st.write("Result of the SQL query:")
-            st.dataframe(result_df)
-        except Exception as e:
-            st.error(f'Failed to execute SQL query: {e}')
+    if st.session_state['selected_df'] is not None:
+        with st.spinner('Analyzing data...'):
+            result = asyncio.run(ai_agent_interaction(user_query, model_name, model_temperature))
+            if result['sql_query']:
+                st.subheader('Generated SQL Query')
+                st.code(result['sql_query'], language='sql')
+                
+                if result['sql_results']:  # Add this section to display results
+                    st.subheader('Query Results')
+                    if isinstance(result['sql_results'], list):
+                        st.dataframe(pd.DataFrame(result['sql_results']))
+                    else:
+                        st.write(result['sql_results'])
+            
+            st.markdown(result['analysis'])
     else:
         st.warning('Please select data from a CSV file for the AI agent to analyze.')
 else:
