@@ -11,7 +11,8 @@ from typing import Dict, Any
 # Set Streamlit page configuration
 st.set_page_config(page_title='CSV Analyzer', layout='wide')
 
-# Initialize session state
+if 'chat_history' not in st.session_state:
+    st.session_state['chat_history'] = []
 if 'uploaded_files' not in st.session_state:
     st.session_state['uploaded_files'] = {}
 if 'selected_df' not in st.session_state:
@@ -189,23 +190,38 @@ if st.session_state['uploaded_files']:
         with tabs[idx]:
             st.subheader(f'Data from {file_name}')
             st.dataframe(df)
-# Handle AI agent interaction
+
 if submit_query and check_ollama_server():  
-    st.header('AI Agent Response')
     if st.session_state['selected_df'] is not None:
         with st.spinner('Analyzing data...'):
             result = asyncio.run(ai_agent_interaction(user_query, model_name, model_temperature))
-            if result['sql_query']:
-                st.subheader('Generated SQL Query')
-                st.code(result['sql_query'], language='sql')
-                if result['sql_results']:  # Add this section to display results
-                    st.subheader('Query Results')
-                    if isinstance(result['sql_results'], list):
-                        st.dataframe(pd.DataFrame(result['sql_results']))
-                    else:
-                        st.write(result['sql_results'])
             
-            st.markdown(result['analysis'])
+            # Add to chat history
+            st.session_state['chat_history'].append({
+                'role': 'user',
+                'content': user_query
+            })
+            st.session_state['chat_history'].append({
+                'role': 'assistant',
+                'content': result
+            })
+            
+            # Display chat history
+            for message in st.session_state['chat_history']:
+                with st.chat_message(message['role']):
+                    if message['role'] == 'user':
+                        st.write(message['content'])
+                    else:
+                        if message['content']['sql_query']:
+                            st.subheader('Generated SQL Query')
+                            st.code(message['content']['sql_query'], language='sql')
+                            if message['content']['sql_results']:
+                                st.subheader('Query Results')
+                                if isinstance(message['content']['sql_results'], list):
+                                    st.dataframe(pd.DataFrame(message['content']['sql_results']))
+                                else:
+                                    st.write(message['content']['sql_results'])
+                        st.write(message['content']['analysis'])
     else:
         st.warning('Please select data from a CSV file for the AI agent to analyze.')
 else:
