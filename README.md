@@ -24,27 +24,24 @@ git clone <url>
 cd datalens
 ```
 
-2. **Install Poetry** (if you haven't already)
-
+2. **install requirements**
 ```bash
- poetry install
+# Create virtual environment
+python -m venv venv
+
+# Activate it (on Windows)
+venv\Scripts\activate
+# OR on Unix/MacOS
+source venv/bin/activate
+
+# Install only the required packages
+pip install streamlit pandas requests ollama duckdb
 ```
 
-4. **Install and start Ollama**
-- Follow the installation instructions at [Ollama's website](https://ollama.ai)
-- Start the Ollama server
-- Pull your preferred model (e.g., `ollama pull llama2`)
-
-## Running the App 🏃‍♂️
-
-1. **Activate the poetry environment and run program**
+3. **Run and Access the app**
 ```bash
-poetry shell
-streamlit run datalens/app.py
+streamlit run app.py
 ```
-
-
-3. **Access the app**
 - Open your browser and navigate to `http://localhost:8501`
 
 ## Usage Example 💡
